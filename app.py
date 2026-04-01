@@ -6,17 +6,32 @@ from correction_agent import correct_text
 from validation_agent import validate_transcript
 from mom_agent import generate_minutes_of_meeting
 from tts_agent import text_to_speech_file
+from translation_agent import translate_to_hindi
 
 
 def process_video(video, progress=gr.Progress()):
     if video is None:
-        return "Please upload a video file.", "N/A", " No video uploaded", None, gr.update(visible=False)
+        return (
+            "Please upload a video file.",
+            "N/A",
+            " No video uploaded",
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
     
     # Step 1: Extract Audio
     progress(0.25, desc="Step 1/4: Extracting Audio...")
     audio_path = extract_audio(video)
     if not audio_path:
-        return "Audio extraction failed.", "N/A", " Audio Extraction Error", None, gr.update(visible=False)
+        return (
+            "Audio extraction failed.",
+            "N/A",
+            " Audio Extraction Error",
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
     
     # Step 2: Speech Recognition
     progress(0.5, desc="Step 2/4: Transcribing Audio...")
@@ -32,9 +47,36 @@ def process_video(video, progress=gr.Progress()):
     progress(1.0, desc="Step 4/4: Validating Results...")
     is_valid = validate_transcript(corrected_transcript)
     status = " Transcript Validated" if is_valid else " Validation Issues Found"
-    
-    tts_audio_path = text_to_speech_file(corrected_transcript)
-    return raw_transcript, corrected_transcript, status, tts_audio_path, gr.update(visible=True)
+
+    return (
+        raw_transcript,
+        corrected_transcript,
+        status,
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+    )
+
+
+def speak_corrected_english(corrected_transcript, progress=gr.Progress()):
+    progress(0.1, desc="Generating English speech...")
+    audio_path = text_to_speech_file(corrected_transcript, lang="en")
+    progress(1.0, desc="Speech ready")
+    return audio_path
+
+
+def do_translate_to_hindi(corrected_transcript, progress=gr.Progress()):
+    progress(0.1, desc="Translating to Hindi...")
+    hi = translate_to_hindi(corrected_transcript)
+    progress(1.0, desc="Translation ready")
+    return hi, gr.update(visible=True)
+
+
+def speak_hindi(hindi_text, progress=gr.Progress()):
+    progress(0.1, desc="Generating Hindi speech...")
+    audio_path = text_to_speech_file(hindi_text, lang="hi")
+    progress(1.0, desc="Speech ready")
+    return audio_path
 
 
 def process_minutes(corrected_transcript, progress=gr.Progress()):
@@ -73,7 +115,13 @@ with gr.Blocks(title="Multi-Agent Video Transcription") as demo:
                 lines=10
             )
 
-            tts_audio_output = gr.Audio(label="AI Spoken Audio (Corrected Transcript)", type="filepath")
+            speak_en_btn = gr.Button(" Speak Corrected (English)", visible=False)
+            tts_en_output = gr.Audio(label="AI Spoken Audio (English)", type="filepath")
+
+            translate_hi_btn = gr.Button(" Translate to Hindi", visible=False)
+            hindi_output = gr.Textbox(label="Hindi Translation", lines=6)
+            speak_hi_btn = gr.Button(" Speak Hindi", visible=False)
+            tts_hi_output = gr.Audio(label="AI Spoken Audio (Hindi)", type="filepath")
 
     with gr.Row():
         with gr.Column(scale=1):
@@ -97,7 +145,25 @@ with gr.Blocks(title="Multi-Agent Video Transcription") as demo:
     submit_btn.click(
         fn=process_video,
         inputs=video_input,
-        outputs=[raw_output, corrected_output, validation_status, tts_audio_output, mom_btn]
+        outputs=[raw_output, corrected_output, validation_status, mom_btn, speak_en_btn, translate_hi_btn]
+    )
+
+    speak_en_btn.click(
+        fn=speak_corrected_english,
+        inputs=corrected_output,
+        outputs=tts_en_output,
+    )
+
+    translate_hi_btn.click(
+        fn=do_translate_to_hindi,
+        inputs=corrected_output,
+        outputs=[hindi_output, speak_hi_btn],
+    )
+
+    speak_hi_btn.click(
+        fn=speak_hindi,
+        inputs=hindi_output,
+        outputs=tts_hi_output,
     )
 
     mom_btn.click(
