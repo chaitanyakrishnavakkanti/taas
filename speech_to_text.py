@@ -28,10 +28,14 @@ class SpeechToTextAgent:
         print(f"Transcribing audio file: {audio_path}")
 
         result = self.model.transcribe(audio_path)
+        return result["text"]
 
-        transcript = result["text"]
-
-        return transcript
+    def transcribe_with_segments(self, audio_path):
+        print(f"Transcribing audio file: {audio_path}")
+        result = self.model.transcribe(audio_path)
+        text = result.get("text", "")
+        segments = result.get("segments", [])
+        return text, segments
 
 
 def transcribe_audio(audio_path):
@@ -44,6 +48,12 @@ def transcribe_audio(audio_path):
     transcript = agent.transcribe(audio_path)
 
     return transcript
+
+
+def transcribe_audio_with_segments(audio_path):
+    agent = SpeechToTextAgent()
+    text, segments = agent.transcribe_with_segments(audio_path)
+    return text, segments
 
 
 # Test block

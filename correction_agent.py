@@ -12,9 +12,16 @@ class CorrectionAgent:
     def correct_text(self, transcript):
 
         prompt = f"""
-Correct grammar/spelling. Return ONLY the result. 
-Sentence: {transcript}
-Correction:"""
+Correct grammar and spelling in the transcript below.
+
+Rules:
+- Preserve speaker labels like "Person 1:" and "Person 2:".
+- Preserve line breaks.
+- Return ONLY the corrected transcript text.
+
+Transcript:
+{transcript}
+"""
 
         try:
             response = ollama.chat(
@@ -24,39 +31,46 @@ Correction:"""
 
             corrected = response["message"]["content"].strip()
 
-            # If the model repeats the prompt, the actual answer is usually at the bottom
-            # We look for common patterns or just take the last meaningful line
-            lines = [l.strip() for l in corrected.split("\n") if l.strip()]
-            
-            # Simple list of words/patterns that indicate meta-talk or prompt repetition
             unwanted_prefixes = (
-                "Sure,", "Corrected:", "Correction:", "Sentence:", 
-                "Input:", "Output:", "Important", "Rules:", "Result:", "Correction:"
+                "Sure,",
+                "Corrected:",
+                "Correction:",
+                "Sentence:",
+                "Transcript:",
+                "Input:",
+                "Output:",
+                "Important",
+                "Rules:",
+                "Result:",
             )
-            
-            final_text = ""
-            for line in reversed(lines):
-                clean_line = line.lstrip("> *-").strip()
-                
-                # If the line starts with an unwanted prefix, strip it and see if anything remains
-                found_prefix = False
-                for p in unwanted_prefixes:
-                    if clean_line.startswith(p):
-                        clean_line = clean_line[len(p):].strip()
-                        found_prefix = True
-                
-                # After stripping potential prefixes, if we have a solid sentence, use it
-                if clean_line and len(clean_line.split()) > 2:
-                    final_text = clean_line
-                    break
-            
-            # Fallback to the last line's cleaned version if no multi-word sentence found
-            if not final_text and lines:
-                final_text = lines[-1].lstrip("> *-").strip()
-                for p in unwanted_prefixes:
-                    if final_text.startswith(p):
-                        final_text = final_text[len(p):].strip()
 
+            cleaned_lines = []
+            for raw_line in corrected.split("\n"):
+                line = raw_line.strip()
+                if not line:
+                    cleaned_lines.append("")
+                    continue
+
+                line = line.lstrip("> *-").strip()
+                lowered = line.lower()
+                if lowered.startswith("transcript:") and ("person 1" not in lowered and "person 2" not in lowered):
+                    continue
+
+                skip = False
+                for p in unwanted_prefixes:
+                    if line.startswith(p):
+                        remainder = line[len(p):].strip()
+                        if remainder:
+                            line = remainder
+                        else:
+                            skip = True
+                        break
+
+                if skip:
+                    continue
+                cleaned_lines.append(line)
+
+            final_text = "\n".join(cleaned_lines).strip()
             return final_text if final_text else transcript
         except Exception as e:
             print(f"Ollama connection issue: {e}")
