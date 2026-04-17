@@ -1,4 +1,31 @@
+from functools import lru_cache
+
+import numpy as np
 import whisper
+
+from config import WHISPER_MODEL_SIZE
+from runtime_utils import ensure_ffmpeg_in_path
+
+
+@lru_cache(maxsize=2)
+def _load_whisper_model(model_size):
+    ensure_ffmpeg_in_path()
+    print(f"Loading Whisper model: {model_size}")
+    return whisper.load_model(model_size)
+
+
+def _load_audio_input(audio_path, sample_rate=16000):
+    """
+    Load audio into memory so transcription does not depend on ffmpeg being
+    discoverable from the current shell.
+    """
+    try:
+        import librosa
+
+        audio, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
+        return audio.astype(np.float32)
+    except Exception:
+        return audio_path
 
 
 class SpeechToTextAgent:
@@ -7,12 +34,11 @@ class SpeechToTextAgent:
     Converts audio files into text transcripts
     """
 
-    def __init__(self, model_size="base"):
+    def __init__(self, model_size=WHISPER_MODEL_SIZE):
         """
         Initialize Whisper speech recognition model
         """
-        print("Loading Whisper model...")
-        self.model = whisper.load_model(model_size)
+        self.model = _load_whisper_model(model_size)
 
     def transcribe(self, audio_path):
         """
@@ -27,12 +53,12 @@ class SpeechToTextAgent:
 
         print(f"Transcribing audio file: {audio_path}")
 
-        result = self.model.transcribe(audio_path)
+        result = self.model.transcribe(_load_audio_input(audio_path))
         return result["text"]
 
     def transcribe_with_segments(self, audio_path):
         print(f"Transcribing audio file: {audio_path}")
-        result = self.model.transcribe(audio_path)
+        result = self.model.transcribe(_load_audio_input(audio_path))
         text = result.get("text", "")
         segments = result.get("segments", [])
         return text, segments

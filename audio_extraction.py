@@ -1,12 +1,12 @@
+import tempfile
+
 import ffmpeg
-import os
 
-# Add known ffmpeg path to environment
-ffmpeg_path = r"C:\Users\sathv\anaconda3\envs\seci\Library\bin"
-if ffmpeg_path not in os.environ["PATH"]:
-    os.environ["PATH"] += os.pathsep + ffmpeg_path
+from config import TEMP_DIR
+from runtime_utils import ensure_ffmpeg_in_path
 
-def extract_audio(video_path, output_audio="audio.wav"):
+
+def extract_audio(video_path, output_audio=None):
     """
     Extract high-quality audio from video and format it for speech recognition.
     
@@ -18,6 +18,18 @@ def extract_audio(video_path, output_audio="audio.wav"):
         str: Path to extracted audio file
     """
 
+    TEMP_DIR.mkdir(exist_ok=True)
+    ffmpeg_executable = ensure_ffmpeg_in_path()
+
+    if output_audio is None:
+        with tempfile.NamedTemporaryFile(
+            prefix="audio_",
+            suffix=".wav",
+            dir=TEMP_DIR,
+            delete=False,
+        ) as temp_file:
+            output_audio = temp_file.name
+
     try:
         (
             ffmpeg
@@ -28,10 +40,10 @@ def extract_audio(video_path, output_audio="audio.wav"):
                 ac=1,                
                 ar='16000'           
             )
-            .run(overwrite_output=True)
+            .run(cmd=ffmpeg_executable or "ffmpeg", overwrite_output=True)
         )
 
-        print("Audio extracted and formatted for ASR successfully!")
+        print(f"Audio extracted and formatted for ASR successfully: {output_audio}")
         return output_audio
 
     except FileNotFoundError:

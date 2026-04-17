@@ -1,0 +1,15 @@
+gradio
+huggingface-hub<1.0
+openai-whisper
+torch
+google-genai
+ffmpeg-python
+numpy
+librosa
+scikit-learn
+gTTS
+edge-tts
+imageio-ffmpeg
+fastapi
+uvicorn
+python-multipart

@@ -2,23 +2,48 @@ import asyncio
 import os
 import uuid
 
+from config import TTS_OUTPUT_DIR
 
-def text_to_speech_file(text, lang="en", output_dir="tts_outputs"):
+
+VOICE_MAP = {
+    "en": "en-US-AriaNeural",
+    "en-US": "en-US-AriaNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "hi-IN": "hi-IN-SwaraNeural",
+    "ta": "ta-IN-PallaviNeural",
+    "ta-IN": "ta-IN-PallaviNeural",
+    "te": "te-IN-ShrutiNeural",
+    "te-IN": "te-IN-ShrutiNeural",
+    "kn": "kn-IN-SapnaNeural",
+    "kn-IN": "kn-IN-SapnaNeural",
+}
+
+
+def text_to_speech_file(text, lang="en", output_dir=None):
     t = (text or "").strip()
     if not t:
         return None
 
+    if output_dir is None:
+        output_dir = TTS_OUTPUT_DIR
+
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, f"tts_{uuid.uuid4().hex}.mp3")
 
-    if lang in ("hi", "hi-IN"):
-        edge_path = _edge_tts_to_file(t, out_path, voice="hi-IN-SwaraNeural")
+    edge_voice = VOICE_MAP.get(lang)
+    if edge_voice:
+        edge_path = _edge_tts_to_file(t, out_path, voice=edge_voice)
         if _is_valid_audio_file(edge_path):
             return edge_path
 
     try:
         from gtts import gTTS
-        gtts_lang = "hi" if lang == "hi-IN" else lang
+        gtts_lang = {
+            "hi-IN": "hi",
+            "ta-IN": "ta",
+            "te-IN": "te",
+            "kn-IN": "kn",
+        }.get(lang, lang)
         tld = "co.in" if gtts_lang == "hi" else "com"
         tts = gTTS(text=t, lang=gtts_lang, tld=tld, slow=False)
         tts.save(out_path)

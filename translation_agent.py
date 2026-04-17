@@ -1,69 +1,77 @@
-import ollama
+import re
+
+from gemini_service import generate_text
 
 
-def _extract_devanagari(text):
+LANGUAGE_SPECS = {
+    "hi": {"name": "Hindi", "script": "Devanagari"},
+    "ta": {"name": "Tamil", "script": "Tamil"},
+    "te": {"name": "Telugu", "script": "Telugu"},
+    "kn": {"name": "Kannada", "script": "Kannada"},
+}
+
+
+def _extract_script_text(text, lang_code):
     t = text or ""
+    spec = LANGUAGE_SPECS.get(lang_code, LANGUAGE_SPECS["hi"])
+    ranges = {
+        "Devanagari": [(0x0900, 0x097F)],
+        "Tamil": [(0x0B80, 0x0BFF)],
+        "Telugu": [(0x0C00, 0x0C7F)],
+        "Kannada": [(0x0C80, 0x0CFF)],
+    }
+    allowed_ranges = ranges.get(spec["script"], [])
     kept = []
     for ch in t:
-        o = ord(ch)
-        if 0x0900 <= o <= 0x097F:
+        code = ord(ch)
+        if any(start <= code <= end for start, end in allowed_ranges):
             kept.append(ch)
         elif kept and ch in (" ", "\n", "\t", ".", ",", "!", "?", "-", ":", ";", "(", ")"):
             kept.append(ch)
     cleaned = "".join(kept)
-    cleaned = "\n".join([ln.strip() for ln in cleaned.splitlines() if ln.strip()])
+    cleaned = "\n".join([line.strip() for line in cleaned.splitlines() if line.strip()])
+    cleaned = cleaned.strip()
+    cleaned = re.sub(r"\s+[.,:;!?-]+$", "", cleaned)
     return cleaned.strip()
 
 
 class TranslationAgent:
-    def __init__(self, model="gemma:2b"):
-        self.model = model
-
-    def translate_to_hindi(self, text):
-        t = (text or "").strip()
-        if not t:
+    def translate(self, text, target_language="hi"):
+        source_text = (text or "").strip()
+        if not source_text:
             return ""
 
-        prompts = [
-            f"""
-Translate the text to Hindi.
+        spec = LANGUAGE_SPECS.get(target_language, LANGUAGE_SPECS["hi"])
+        prompt = f"""
+Translate the following text into {spec["name"]}.
+
 Rules:
-- Output must be ONLY Hindi written in Devanagari script.
-- Do NOT include any English.
-- Do NOT include labels, quotes, romanization, or explanations.
+- Output only {spec["script"]} script.
+- Do not include English, transliteration, quotes, or explanations.
+- Keep the meaning faithful and natural.
 
 Text:
-{t}
-""".strip(),
-            f"""
-Return ONLY the Hindi translation in Devanagari characters (Unicode \u0900-\u097F).
-If you cannot comply, return an empty string.
+{source_text}
+""".strip()
 
-Text:
-{t}
-""".strip(),
-        ]
+        try:
+            response_text = generate_text(
+                prompt,
+                system_instruction=f"You are a precise {spec['name']} translation assistant.",
+                temperature=0.2,
+                max_output_tokens=3072,
+            )
+        except Exception as e:
+            print(f"Gemini translation issue ({spec['name']}): {e}")
+            return ""
 
-        last = ""
-        for prompt in prompts:
-            try:
-                response = ollama.chat(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                content = (response.get("message", {}) or {}).get("content", "")
-                content = (content or "").strip()
-                last = content
-                cleaned = _extract_devanagari(content)
-                if cleaned:
-                    return cleaned
-            except Exception as e:
-                print(f"Ollama connection issue: {e}")
-                return ""
+        return _extract_script_text(response_text, target_language)
 
-        return _extract_devanagari(last)
+
+def translate_text(text, target_language="hi"):
+    agent = TranslationAgent()
+    return agent.translate(text, target_language=target_language)
 
 
 def translate_to_hindi(text):
-    agent = TranslationAgent()
-    return agent.translate_to_hindi(text)
+    return translate_text(text, target_language="hi")
