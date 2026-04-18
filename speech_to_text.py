@@ -40,7 +40,7 @@ class SpeechToTextAgent:
         """
         self.model = _load_whisper_model(model_size)
 
-    def transcribe(self, audio_path):
+    def transcribe(self, audio_path, language=None):
         """
         Convert audio speech to text
 
@@ -53,32 +53,34 @@ class SpeechToTextAgent:
 
         print(f"Transcribing audio file: {audio_path}")
 
-        result = self.model.transcribe(_load_audio_input(audio_path))
+        language = None if not language or language == "auto" else language
+        result = self.model.transcribe(_load_audio_input(audio_path), language=language)
         return result["text"]
 
-    def transcribe_with_segments(self, audio_path):
+    def transcribe_with_segments(self, audio_path, language=None):
         print(f"Transcribing audio file: {audio_path}")
-        result = self.model.transcribe(_load_audio_input(audio_path))
+        language = None if not language or language == "auto" else language
+        result = self.model.transcribe(_load_audio_input(audio_path), language=language)
         text = result.get("text", "")
         segments = result.get("segments", [])
         return text, segments
 
 
-def transcribe_audio(audio_path):
+def transcribe_audio(audio_path, language=None):
     """
     Helper function used by other modules
     """
 
     agent = SpeechToTextAgent()
 
-    transcript = agent.transcribe(audio_path)
+    transcript = agent.transcribe(audio_path, language=language)
 
     return transcript
 
 
-def transcribe_audio_with_segments(audio_path):
+def transcribe_audio_with_segments(audio_path, language=None):
     agent = SpeechToTextAgent()
-    text, segments = agent.transcribe_with_segments(audio_path)
+    text, segments = agent.transcribe_with_segments(audio_path, language=language)
     return text, segments
 
 

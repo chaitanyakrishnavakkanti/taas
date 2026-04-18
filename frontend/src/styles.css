@@ -89,6 +89,60 @@ textarea {
   font-size: 0.9rem;
 }
 
+.quality-card {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.quality-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.quality-badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.quality-good {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.quality-medium {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.quality-poor {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.9);
+  overflow: hidden;
+  margin: 10px 0 6px;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
 .hero-grid {
   display: grid;
   gap: 12px;
@@ -243,6 +297,12 @@ textarea {
   margin-top: 16px;
 }
 
+.export-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 .inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -289,7 +349,8 @@ textarea {
 .transcript-grid,
 .audio-grid,
 .notes-grid,
-.review-grid {
+.review-grid,
+.comparison-metrics {
   display: grid;
   gap: 16px;
 }
@@ -299,6 +360,12 @@ textarea {
 .notes-grid,
 .review-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-grid-three,
+.notes-grid-three,
+.comparison-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .text-panel {
@@ -316,6 +383,51 @@ textarea {
   line-height: 1.6;
 }
 
+.rich-text-panel .rich-text-content {
+  min-height: 220px;
+  color: #0f172a;
+  line-height: 1.7;
+}
+
+.rich-text-panel.tall .rich-text-content {
+  min-height: 320px;
+}
+
+.rich-line {
+  margin: 0 0 10px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.rich-line.spacer {
+  min-height: 12px;
+  margin: 0;
+}
+
+.rich-line.bullet {
+  color: #334155;
+}
+
+.bullet-mark {
+  color: #0f766e;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.highlight-mark {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.35), rgba(249, 115, 22, 0.24));
+  color: #7c2d12;
+  font-weight: 800;
+}
+
+.rich-placeholder {
+  margin: 0;
+  color: #64748b;
+}
+
 .text-panel.tall textarea {
   min-height: 320px;
 }
@@ -329,6 +441,90 @@ textarea {
   margin: 0;
   padding-left: 18px;
   color: #475569;
+}
+
+.search-input,
+.speaker-rename-item input,
+.field select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+}
+
+.speaker-rename-list {
+  display: grid;
+  gap: 10px;
+}
+
+.speaker-rename-item {
+  display: grid;
+  gap: 6px;
+}
+
+.speaker-rename-item span {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.timeline-card {
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.timeline-list {
+  display: grid;
+  gap: 12px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.timeline-item {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.timeline-time,
+.timeline-speaker {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.timeline-speaker {
+  background: rgba(29, 78, 216, 0.12);
+  color: #1d4ed8;
+}
+
+.timeline-text {
+  margin: 0;
+  color: #334155;
+  line-height: 1.65;
+}
+
+mark {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 3px;
 }
 
 .audio-card audio {
@@ -358,11 +554,18 @@ textarea {
   .audio-grid,
   .notes-grid,
   .review-grid,
+  .comparison-metrics,
   .inline-actions {
     grid-template-columns: 1fr;
   }
 
   .inline-actions {
     display: grid;
+  }
+
+  .quality-header,
+  .timeline-meta {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

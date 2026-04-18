@@ -163,15 +163,23 @@ def _status_markdown(result):
     validation = result.validation
     if result.ok and validation.is_valid:
         lines.append("Status: Transcript validated")
+    elif result.ok and validation.verdict == "review":
+        lines.append("Status: Transcript needs review")
     elif result.ok:
         lines.append("Status: Transcript generated with follow-up checks")
     else:
         lines.append("Status: Pipeline failed")
 
+    if validation.summary:
+        lines.append(f"- Gemini review: {validation.summary}")
+    if validation.confidence_score:
+        lines.append(f"- Confidence score: {validation.confidence_score}/100")
     if result.errors:
         lines.extend([f"- {message}" for message in result.errors])
     if validation.issues:
         lines.extend([f"- {issue}" for issue in validation.issues])
+    if validation.suggested_actions:
+        lines.extend([f"- Next step: {action}" for action in validation.suggested_actions])
 
     return "\n".join(lines)
 

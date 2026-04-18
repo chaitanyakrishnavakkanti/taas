@@ -34,10 +34,17 @@ class CorrectionAgent:
     Fast transcript cleanup using Gemini.
     """
 
-    def correct_text(self, transcript):
+    def correct_text(self, transcript, domain_mode="meeting"):
         cleaned_input = _basic_cleanup(transcript)
         if not cleaned_input:
             return ""
+
+        domain_guidance = {
+            "meeting": "Keep the tone professional and natural for workplace meeting notes.",
+            "lecture": "Preserve explanatory flow and technical teaching language.",
+            "interview": "Preserve question-and-answer structure clearly.",
+            "discussion": "Preserve conversational back-and-forth naturally.",
+        }.get((domain_mode or "meeting").strip().lower(), "Preserve the original context and tone.")
 
         prompt = f"""
 Lightly correct the transcript below.
@@ -47,6 +54,7 @@ Rules:
 - Preserve line breaks.
 - Fix spelling, punctuation, casing, and obvious grammar only.
 - Do not summarize, explain, or rewrite the meaning.
+- {domain_guidance}
 - Return only the corrected transcript.
 
 Transcript:
@@ -66,9 +74,9 @@ Transcript:
             return cleaned_input
 
 
-def correct_text(transcript):
+def correct_text(transcript, domain_mode="meeting"):
     agent = CorrectionAgent()
-    return agent.correct_text(transcript)
+    return agent.correct_text(transcript, domain_mode=domain_mode)
 
 
 if __name__ == "__main__":
