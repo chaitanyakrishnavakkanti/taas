@@ -143,6 +143,25 @@ textarea {
   border-radius: 999px;
 }
 
+.metric-score-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.metric-score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.metric-score-row strong {
+  color: #0f172a;
+}
+
 .hero-grid {
   display: grid;
   gap: 12px;

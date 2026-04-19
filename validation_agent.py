@@ -1,9 +1,13 @@
 import json
 import re
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
-from gemini_service import generate_text
+from config import OPENROUTER_API_KEY, OPENROUTER_VALIDATION_MODEL
+from decision_engine import decide_verdict, is_valid_verdict
+from scoring_engine import calculate_confidence_score, missing_metric_issues, normalize_metric_scores
 
 
 ERROR_MARKERS = (
@@ -24,7 +28,54 @@ class ValidationResult:
     issues: List[str] = field(default_factory=list)
     strengths: List[str] = field(default_factory=list)
     suggested_actions: List[str] = field(default_factory=list)
-    validator: str = "gemini"
+    improvement_categories: List[str] = field(default_factory=list)
+    editor_feedback: str = ""
+    validator: str = "openrouter"
+    metric_scores: Dict[str, int] = field(default_factory=dict)
+    critical_issues: List[str] = field(default_factory=list)
+
+
+def _openrouter_generate_text(prompt, *, system_instruction, temperature=0.1, max_output_tokens=1024):
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("Missing OPENROUTER_API_KEY. Set it in .env before running validation.")
+
+    user_prompt = f"{system_instruction}\n\n{prompt}"
+    body = {
+        "model": OPENROUTER_VALIDATION_MODEL,
+        "messages": [
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_output_tokens,
+    }
+
+    request = Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://127.0.0.1:5173",
+            "X-Title": "TaaS Transcript Validator",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenRouter HTTP {exc.code}: {detail[:500]}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"OpenRouter connection failed: {exc.reason}") from exc
+
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("OpenRouter returned no validation choices.")
+
+    message = choices[0].get("message") or {}
+    return str(message.get("content") or "").strip()
 
 
 def _non_empty_line_count(text):
@@ -101,30 +152,32 @@ def _normalize_validation_payload(payload):
     if not isinstance(payload, dict):
         return {}
 
-    verdict = str(payload.get("verdict", "")).strip().lower()
-    if verdict not in {"pass", "review", "fail"}:
-        verdict = "review"
-
-    score_raw = payload.get("confidence_score", payload.get("score", 0))
-    try:
-        confidence_score = max(0, min(100, int(score_raw)))
-    except (TypeError, ValueError):
-        confidence_score = 0
-
-    is_valid = bool(payload.get("is_valid"))
-    if verdict == "pass":
-        is_valid = True
-    elif verdict == "fail":
-        is_valid = False
+    raw_metric_scores = payload.get("metric_scores", payload.get("metrics", {}))
+    metric_scores = normalize_metric_scores(raw_metric_scores)
+    confidence_score = calculate_confidence_score(metric_scores)
+    issues = _clean_string_list(payload.get("issues", []))
+    issues.extend(missing_metric_issues(raw_metric_scores))
+    critical_issues = _clean_string_list(payload.get("critical_issues", []))
+    verdict = decide_verdict(confidence_score, issues=issues, critical_issues=critical_issues)
 
     return {
-        "is_valid": is_valid,
+        "is_valid": is_valid_verdict(verdict),
         "verdict": verdict,
         "confidence_score": confidence_score,
         "summary": str(payload.get("summary", "")).strip(),
-        "issues": _clean_string_list(payload.get("issues", [])),
+        "issues": issues,
         "strengths": _clean_string_list(payload.get("strengths", [])),
-        "suggested_actions": _clean_string_list(payload.get("suggested_actions", [])),
+        "suggested_actions": _clean_string_list(
+            payload.get("suggested_actions", payload.get("suggestions", []))
+        ),
+        "improvement_categories": _clean_string_list(
+            payload.get("improvement_categories", payload.get("improvement_types", []))
+        ),
+        "editor_feedback": str(
+            payload.get("editor_feedback", payload.get("english_feedback", ""))
+        ).strip(),
+        "metric_scores": metric_scores,
+        "critical_issues": critical_issues,
     }
 
 
@@ -136,9 +189,22 @@ class FinalValidationAgent:
                 is_valid=False,
                 verdict="fail",
                 confidence_score=0,
-                summary="Transcript is empty, so Gemini validation cannot verify it.",
+                summary="Transcript is empty, so OpenRouter validation cannot verify it.",
                 issues=["Transcript is empty."],
                 suggested_actions=["Generate or paste a transcript before running validation."],
+                improvement_categories=["missing_content"],
+                editor_feedback=(
+                    "The transcript is empty. Regenerate the transcript before attempting "
+                    "grammar or readability cleanup."
+                ),
+                metric_scores={
+                    "grammar_correctness": 0,
+                    "clarity_readability": 0,
+                    "sentence_structure": 0,
+                    "completeness": 0,
+                    "noise_reduction": 0,
+                },
+                critical_issues=["Transcript is empty."],
             )
 
         guardrail_issues = _basic_guardrail_issues(text)
@@ -147,9 +213,22 @@ class FinalValidationAgent:
                 is_valid=False,
                 verdict="fail",
                 confidence_score=0,
-                summary="Transcript failed basic validation checks before Gemini review.",
+                summary="Transcript failed basic validation checks before OpenRouter review.",
                 issues=guardrail_issues,
                 suggested_actions=["Fix the transcript content, then run validation again."],
+                improvement_categories=["formatting", "content_integrity"],
+                editor_feedback=(
+                    "Repair the transcript content first. Remove upstream error text, ensure "
+                    "speaker labels are valid, and provide enough natural-language content to review."
+                ),
+                metric_scores={
+                    "grammar_correctness": 0,
+                    "clarity_readability": 0,
+                    "sentence_structure": 0,
+                    "completeness": 0,
+                    "noise_reduction": 0,
+                },
+                critical_issues=guardrail_issues,
             )
 
         domain_guidance = {
@@ -160,34 +239,48 @@ class FinalValidationAgent:
         }.get((domain_mode or "meeting").strip().lower(), "Judge it as a general spoken transcript.")
 
         prompt = f"""
-Review the final transcript for quality.
+Review the final corrected transcript for quality.
 
-Decide whether it is acceptable as a final transcript.
-Focus on:
-- whether it reads like a real transcript
-- whether speaker labels are consistent if present
-- whether there are obvious recognition mistakes, broken sentences, or hallucinated text
-- whether punctuation and grammar are good enough for delivery
-- {domain_guidance}
+Evaluate only the transcript text. Do not validate the audio.
+Use these criteria and scores from 0 to 100:
+1. grammar_correctness, weight 30: tense correctness, subject-verb agreement, punctuation.
+2. clarity_readability, weight 25: easy to understand, no ambiguity, logical phrasing.
+3. sentence_structure, weight 20: proper sentence boundaries, no run-on sentences, good formatting.
+4. completeness, weight 15: meaning preserved, no missing or distorted information.
+5. noise_reduction, weight 10: filler words and unnecessary repetitions are removed where appropriate.
+
+{domain_guidance}
 
 Return JSON only with this exact shape:
 {{
-  "is_valid": true,
-  "verdict": "pass",
-  "confidence_score": 0,
+  "metric_scores": {{
+    "grammar_correctness": 0,
+    "clarity_readability": 0,
+    "sentence_structure": 0,
+    "completeness": 0,
+    "noise_reduction": 0
+  }},
   "summary": "short summary",
   "issues": ["issue"],
   "strengths": ["strength"],
-  "suggested_actions": ["action"]
+  "suggestions": ["action"],
+  "improvement_categories": ["grammar", "clarity", "sentence_structure", "completeness", "noise_reduction", "speaker_formatting", "contextual_accuracy"],
+  "editor_feedback": "English instructions for the transcript editor describing what to improve and what to preserve.",
+  "critical_issues": ["critical issue"]
 }}
 
 Rules:
-- verdict must be one of "pass", "review", "fail"
-- confidence_score must be an integer from 0 to 100
+- return only JSON
+- all metric scores must be integers from 0 to 100
 - keep summary under 30 words
-- if the transcript is acceptable, set verdict to "pass"
-- if there are quality concerns but it is still partly usable, set verdict to "review"
-- if it is clearly not acceptable, set verdict to "fail"
+- write editor_feedback in plain English for another AI editor
+- editor_feedback must explain what is wrong, what should be improved, and what must be preserved
+- improvement_categories should name the main error types seen in the transcript
+- use contextual_accuracy when wording changes, unclear meaning, or context drift are present
+- use speaker_formatting when speaker labels or turn structure need repair
+- put meaning changes, missing content, hallucinated content, or malformed speaker labels in critical_issues
+- use an empty list when there are no items
+- do not include confidence_score or verdict; those are computed deterministically by the app
 - return JSON only
 
 Transcript:
@@ -195,9 +288,12 @@ Transcript:
 """.strip()
 
         try:
-            response_text = generate_text(
+            response_text = _openrouter_generate_text(
                 prompt,
-                system_instruction="You are a strict transcript quality validator that responds with JSON only.",
+                system_instruction=(
+                    "You are an independent strict transcript quality validator. "
+                    "Respond with JSON only and do not assume the transcript is correct."
+                ),
                 temperature=0.1,
                 max_output_tokens=1024,
             )
@@ -207,30 +303,41 @@ Transcript:
                 is_valid=False,
                 verdict="unavailable",
                 confidence_score=0,
-                summary="Gemini validation could not be completed.",
-                issues=[f"Gemini validation failed: {exc}"],
-                suggested_actions=["Check Gemini API configuration and try validation again."],
+                summary="OpenRouter validation could not be completed.",
+                issues=[f"OpenRouter validation failed: {exc}"],
+                suggested_actions=["Check OpenRouter API configuration and try validation again."],
+                improvement_categories=["validation_unavailable"],
+                editor_feedback=(
+                    "Validation feedback was unavailable because OpenRouter could not complete the review. "
+                    "Keep meaning and speaker turns intact if you retry correction."
+                ),
             )
 
         if not payload:
+            metric_scores = {
+                "grammar_correctness": 0,
+                "clarity_readability": 0,
+                "sentence_structure": 0,
+                "completeness": 0,
+                "noise_reduction": 0,
+            }
             return ValidationResult(
                 is_valid=False,
                 verdict="review",
                 confidence_score=0,
-                summary="Gemini returned an unreadable validation response.",
-                issues=["Could not parse Gemini validation output."],
+                summary="OpenRouter returned an unreadable validation response.",
+                issues=["Could not parse OpenRouter validation output."],
                 suggested_actions=["Run validation again and inspect backend logs if the problem continues."],
+                improvement_categories=["validation_unavailable"],
+                editor_feedback=(
+                    "The validator response could not be parsed. If you retry correction, preserve "
+                    "meaning and speaker turns and focus on grammar, clarity, and formatting."
+                ),
+                metric_scores=metric_scores,
             )
 
-        if payload["verdict"] == "pass" and payload["confidence_score"] == 0:
-            payload["confidence_score"] = 80
-        if payload["verdict"] == "review" and payload["confidence_score"] == 0:
-            payload["confidence_score"] = 55
-        if payload["verdict"] == "fail" and payload["confidence_score"] == 0:
-            payload["confidence_score"] = 25
-
         if not payload["summary"]:
-            payload["summary"] = "Gemini completed transcript validation."
+            payload["summary"] = "OpenRouter completed transcript validation."
 
         return ValidationResult(**payload)
 

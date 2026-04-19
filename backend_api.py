@@ -6,13 +6,16 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from correction_agent import correct_text
 from config import (
     DEFAULT_DOMAIN_MODE,
     DEFAULT_TRANSCRIPTION_LANGUAGE,
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    OPENROUTER_API_KEY,
+    OPENROUTER_VALIDATION_MODEL,
     TEMP_DIR,
     TTS_OUTPUT_DIR,
 )
@@ -50,6 +53,11 @@ class TTSRequest(BaseModel):
     lang: str = "en"
 
 
+class RefineRequest(TranscriptRequest):
+    issues: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+
 def _public_audio_url(audio_path: str) -> str:
     path = Path(audio_path)
     return f"/api/media/audio/{path.name}"
@@ -64,7 +72,12 @@ def _serialize_validation(result):
         "issues": result.issues,
         "strengths": result.strengths,
         "suggestedActions": result.suggested_actions,
+        "suggestions": result.suggested_actions,
+        "improvementCategories": result.improvement_categories,
+        "editorFeedback": result.editor_feedback,
         "validator": result.validator,
+        "metricScores": result.metric_scores,
+        "criticalIssues": result.critical_issues,
     }
 
 
@@ -75,6 +88,8 @@ def health():
         "service": "adaptive-hybrid-ai-transcription-system",
         "geminiConfigured": bool(GEMINI_API_KEY),
         "geminiModel": GEMINI_MODEL,
+        "openRouterConfigured": bool(OPENROUTER_API_KEY),
+        "openRouterValidationModel": OPENROUTER_VALIDATION_MODEL,
         "defaultLanguage": DEFAULT_TRANSCRIPTION_LANGUAGE,
         "defaultDomainMode": DEFAULT_DOMAIN_MODE,
     }
@@ -161,6 +176,32 @@ def validate(payload: TranscriptRequest):
     return {
         "ok": validation.is_valid,
         "validation": _serialize_validation(validation),
+    }
+
+
+@app.post("/api/refine")
+def refine(payload: RefineRequest):
+    transcript = (payload.corrected_transcript or "").strip()
+    if not transcript:
+        raise HTTPException(status_code=400, detail="No transcript provided for refinement.")
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini is not configured on the backend. Set GEMINI_API_KEY and restart the backend.",
+        )
+
+    feedback = {
+        "issues": payload.issues or [],
+        "suggestions": payload.suggestions or [],
+    }
+    refined_text = correct_text(transcript, domain_mode=payload.domain_mode, feedback=feedback)
+    validation = validate_transcript_detailed(refined_text, domain_mode=payload.domain_mode)
+
+    return {
+        "ok": validation.is_valid,
+        "correctedTranscript": refined_text,
+        "validation": _serialize_validation(validation),
+        "message": "Transcript refined with validation feedback.",
     }
 
 

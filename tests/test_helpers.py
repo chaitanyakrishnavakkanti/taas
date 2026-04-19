@@ -27,18 +27,31 @@ class HelperTests(unittest.TestCase):
             {
                 "is_valid": False,
                 "verdict": "review",
-                "score": "67",
+                "metric_scores": {
+                    "grammar_correctness": 70,
+                    "clarity_readability": 68,
+                    "sentence_structure": 65,
+                    "completeness": 70,
+                    "noise_reduction": 60,
+                },
                 "summary": "Needs a quick human check.",
                 "issues": ["Minor wording issue", ""],
                 "strengths": ["Clear speaker flow"],
                 "suggested_actions": ["Review line 3"],
+                "improvement_categories": ["clarity"],
+                "editor_feedback": "Improve readability while preserving the original meaning.",
             }
         )
         self.assertEqual(normalized["verdict"], "review")
-        self.assertEqual(normalized["confidence_score"], 67)
+        self.assertEqual(normalized["confidence_score"], 68)
         self.assertEqual(normalized["issues"], ["Minor wording issue"])
         self.assertEqual(normalized["strengths"], ["Clear speaker flow"])
         self.assertEqual(normalized["suggested_actions"], ["Review line 3"])
+        self.assertEqual(normalized["improvement_categories"], ["clarity"])
+        self.assertEqual(
+            normalized["editor_feedback"],
+            "Improve readability while preserving the original meaning.",
+        )
 
     def test_split_sections_parses_meeting_template(self):
         content = """

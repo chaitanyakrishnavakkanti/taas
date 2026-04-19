@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
+.cache/
 tmp/
 tts_outputs/
 gradio_*.log
 backend_*.log
+frontend_run*.log
 output.mp3
 audio.wav
 transcript.txt

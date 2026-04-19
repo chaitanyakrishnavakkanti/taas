@@ -49,7 +49,9 @@ const initialResult = {
     issues: [],
     strengths: [],
     suggestedActions: [],
-    validator: "gemini",
+    validator: "openrouter",
+    metricScores: {},
+    criticalIssues: [],
   },
   audioQuality: { label: "unknown", score: 0, summary: "" },
   meta: {},
@@ -58,6 +60,7 @@ const initialResult = {
 
 function App() {
   const [geminiConfigured, setGeminiConfigured] = useState(false);
+  const [openRouterConfigured, setOpenRouterConfigured] = useState(false);
   const [speakerCount, setSpeakerCount] = useState(2);
   const [selectedTab, setSelectedTab] = useState("transcript");
   const [videoFile, setVideoFile] = useState(null);
@@ -72,6 +75,7 @@ function App() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [isGeneratingHindi, setIsGeneratingHindi] = useState(false);
   const [isValidatingFinal, setIsValidatingFinal] = useState(false);
+  const [isRefiningWithFeedback, setIsRefiningWithFeedback] = useState(false);
   const [isSimplifying, setIsSimplifying] = useState(false);
   const [result, setResult] = useState(initialResult);
   const [speakerAliases, setSpeakerAliases] = useState({});
@@ -95,10 +99,14 @@ function App() {
       .then((response) => response.json())
       .then((payload) => {
         setGeminiConfigured(Boolean(payload.geminiConfigured));
+        setOpenRouterConfigured(Boolean(payload.openRouterConfigured));
         if (payload.defaultLanguage) setTranscriptionLanguage(payload.defaultLanguage);
         if (payload.defaultDomainMode) setDomainMode(payload.defaultDomainMode);
       })
-      .catch(() => setGeminiConfigured(false));
+      .catch(() => {
+        setGeminiConfigured(false);
+        setOpenRouterConfigured(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -158,16 +166,16 @@ function App() {
         correctedTranscript: payload.correctedTranscript || "",
         timestampedTranscript: payload.timestampedTranscript || "",
         segments: payload.segments || [],
-        validation: payload.validation || initialResult.validation,
+        validation: normalizeValidation(payload.validation),
         audioQuality: payload.audioQuality || initialResult.audioQuality,
         meta: payload.meta || {},
         errors: payload.errors || [],
       });
 
       if (payload.ok && payload.validation?.isValid) {
-        setStatus("Gemini validated the final transcript. It is ready for follow-up actions.");
+        setStatus("OpenRouter validated the final transcript. It is ready for follow-up actions.");
       } else if (payload.ok && payload.validation?.verdict === "review") {
-        setStatus("Gemini found final-stage quality concerns. Review the transcript before delivery.");
+        setStatus("OpenRouter found final-stage quality concerns. Review the transcript before delivery.");
       } else if (payload.ok) {
         setStatus("Transcript generated with review notes. Check validation issues before delivery.");
       } else {
@@ -186,7 +194,7 @@ function App() {
     if (!hasTranscript) return;
 
     setIsValidatingFinal(true);
-    setStatus("Running Gemini final validation...");
+    setStatus("Running OpenRouter final validation...");
     try {
       const response = await fetch(`${API_BASE}/api/validate`, {
         method: "POST",
@@ -197,19 +205,66 @@ function App() {
         }),
       });
       const payload = await checkResponse(response);
-      setResult((current) => ({ ...current, validation: payload.validation || initialResult.validation }));
+      setResult((current) => ({ ...current, validation: normalizeValidation(payload.validation) }));
 
       if (payload.validation?.isValid) {
-        setStatus("Gemini says the final transcript looks correct.");
+        setStatus("OpenRouter says the final transcript looks correct.");
       } else if (payload.validation?.verdict === "review") {
-        setStatus("Gemini says the final transcript needs review before delivery.");
+        setStatus("OpenRouter says the final transcript needs review before delivery.");
       } else {
-        setStatus("Gemini says the final transcript is not ready yet.");
+        setStatus("OpenRouter says the final transcript is not ready yet.");
       }
     } catch (error) {
       setStatus(error.message || "Final validation failed.");
     } finally {
       setIsValidatingFinal(false);
+    }
+  }
+
+  async function handleRefineWithFeedback() {
+    if (!hasTranscript) return;
+
+    const issues = [
+      ...(result.validation?.issues || []),
+      ...(result.validation?.criticalIssues || []),
+    ];
+    const suggestions = result.validation?.suggestedActions || [];
+
+    if (!issues.length && !suggestions.length) {
+      setStatus("No validation feedback is available for refinement.");
+      return;
+    }
+
+    setIsRefiningWithFeedback(true);
+    setStatus("Refining transcript with OpenRouter feedback...");
+    try {
+      const response = await fetch(`${API_BASE}/api/refine`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          corrected_transcript: result.correctedTranscript,
+          domain_mode: domainMode,
+          issues,
+          suggestions,
+        }),
+      });
+      const payload = await checkResponse(response);
+      setResult((current) => ({
+        ...current,
+        correctedTranscript: payload.correctedTranscript || current.correctedTranscript,
+        validation: normalizeValidation(payload.validation),
+      }));
+      setSelectedTab("transcript");
+
+      if (payload.validation?.isValid) {
+        setStatus("Feedback refinement passed OpenRouter validation.");
+      } else {
+        setStatus("Feedback refinement completed. Review the remaining OpenRouter notes.");
+      }
+    } catch (error) {
+      setStatus(error.message || "Feedback refinement failed.");
+    } finally {
+      setIsRefiningWithFeedback(false);
     }
   }
 
@@ -422,19 +477,32 @@ function App() {
   }
 
   const validationIssues = result.validation?.issues || [];
+  const validationCriticalIssues = result.validation?.criticalIssues || [];
   const validationStrengths = result.validation?.strengths || [];
   const suggestedActions = result.validation?.suggestedActions || [];
   const validationVerdict = result.validation?.verdict || "unavailable";
-  const validationSummary = result.validation?.summary || "Gemini validation has not run yet.";
+  const validationSummary = result.validation?.summary || "OpenRouter validation has not run yet.";
   const validationConfidence = result.validation?.confidenceScore || 0;
+  const validationProvider = result.validation?.validator || "openrouter";
+  const validationProviderLabel = validationProvider === "openrouter" ? "OpenRouter" : validationProvider;
+  const validationMetricRows = [
+    ["Grammar Correctness", "grammar_correctness"],
+    ["Clarity & Readability", "clarity_readability"],
+    ["Sentence Structure", "sentence_structure"],
+    ["Completeness", "completeness"],
+    ["Noise Reduction", "noise_reduction"],
+  ].map(([label, key]) => ({
+    label,
+    value: Number(result.validation?.metricScores?.[key] || 0),
+  }));
   const validationHeadline =
     validationVerdict === "pass"
-      ? "Gemini approved the transcript."
+      ? "OpenRouter approved the transcript."
       : validationVerdict === "review"
-        ? "Gemini recommends reviewing the transcript."
+        ? "OpenRouter recommends reviewing the transcript."
         : validationVerdict === "fail"
-          ? "Gemini does not consider the transcript final yet."
-          : "Gemini validation is unavailable.";
+          ? "OpenRouter does not consider the transcript final yet."
+          : "OpenRouter validation is unavailable.";
   const qualityClass =
     validationVerdict === "pass"
       ? "quality-good"
@@ -492,7 +560,7 @@ function App() {
             and export from one polished workspace.
           </p>
           <div className="badge-row">
-            <span className="badge">Whisper + Gemini</span>
+            <span className="badge">Whisper + Gemini + OpenRouter</span>
             <span className="badge">Search + Timestamps</span>
             <span className="badge">Download Ready</span>
           </div>
@@ -581,6 +649,12 @@ function App() {
             <p>{status}</p>
           </div>
 
+          <div className="status-card">
+            <strong>AI providers</strong>
+            <p>Correction, translation, and notes: Gemini</p>
+            <p>Independent final validation: OpenRouter</p>
+          </div>
+
           <div className="quality-card">
             <div className="quality-header">
               <strong>Final Validation</strong>
@@ -591,7 +665,15 @@ function App() {
             <div className="progress-track">
               <div className={`progress-fill ${qualityClass}`} style={{ width: `${validationConfidence}%` }} />
             </div>
-            <small>Confidence {validationConfidence}/100</small>
+            <small>Confidence {validationConfidence}/100 | Validator: {validationProviderLabel}</small>
+            <div className="metric-score-list">
+              {validationMetricRows.map((metric) => (
+                <div className="metric-score-row" key={metric.label}>
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}/100</strong>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="quality-card">
@@ -618,19 +700,34 @@ function App() {
           </div>
 
           <div className="hint-card">
-            The corrected transcript is editable in the workspace. You can refine it manually, then run Gemini
+            The corrected transcript is editable in the workspace. You can refine it manually, then run OpenRouter
             validation again before exporting.
             {!geminiConfigured
-              ? " Gemini is not configured on the backend right now, so validation, notes, and translation are limited."
+              ? " Gemini is not configured on the backend right now, so notes, correction follow-ups, and translation are limited."
+              : ""}
+            {!openRouterConfigured
+              ? " OpenRouter is not configured on the backend right now, so independent validation is limited."
               : ""}
           </div>
 
           <div className="action-stack">
             <button
-              disabled={!hasTranscript || isValidatingFinal || !geminiConfigured}
+              disabled={!hasTranscript || isValidatingFinal || !openRouterConfigured}
               onClick={handleValidateFinalTranscript}
             >
               {isValidatingFinal ? "Validating Final Transcript..." : "Validate Final Transcript"}
+            </button>
+            <button
+              disabled={
+                !hasTranscript ||
+                isRefiningWithFeedback ||
+                !geminiConfigured ||
+                !openRouterConfigured ||
+                (validationIssues.length === 0 && validationCriticalIssues.length === 0 && suggestedActions.length === 0)
+              }
+              onClick={handleRefineWithFeedback}
+            >
+              {isRefiningWithFeedback ? "Refining With Feedback..." : "Refine With Feedback"}
             </button>
             <button disabled={!hasTranscript || isSimplifying || !geminiConfigured} onClick={handleSimplifyTranscript}>
               {isSimplifying ? "Simplifying..." : "Simplified Explanation"}
@@ -770,7 +867,7 @@ function App() {
                       ))}
                     </ul>
                   ) : (
-                    <p>No strengths highlighted by Gemini.</p>
+                    <p>No strengths highlighted by OpenRouter.</p>
                   )}
                 </div>
 
@@ -970,6 +1067,14 @@ function AudioCard({ label, src }) {
       {src ? <audio controls src={src} /> : <p>Audio output will appear here.</p>}
     </article>
   );
+}
+
+function normalizeValidation(validation) {
+  return {
+    ...initialResult.validation,
+    ...(validation || {}),
+    validator: "openrouter",
+  };
 }
 
 function SegmentTimeline({ segments, speakerAliases, searchQuery }) {
